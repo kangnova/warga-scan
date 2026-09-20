@@ -1,7 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult, DocType } from "./types";
 
+export type AiProvider = "gemini" | "openrouter";
+
+/**
+ * Provider AI aktif (env AI_PROVIDER):
+ * - "gemini"     : Google Gemini API (default) — butuh GEMINI_API_KEY
+ * - "openrouter" : endpoint OpenAI-compatible (OpenRouter, Sumopod, vLLM,
+ *                  Ollama, dll) — butuh OPENROUTER_API_KEY, opsional
+ *                  OPENROUTER_BASE_URL & AI_MODEL
+ */
+export function getProvider(): AiProvider {
+  const p = (process.env.AI_PROVIDER || "gemini").toLowerCase();
+  return p === "openrouter" ? "openrouter" : "gemini";
+}
+
 export function isAiConfigured(): boolean {
+  const provider = getProvider();
+  if (provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
   return Boolean(process.env.GEMINI_API_KEY);
 }
 
@@ -53,6 +69,7 @@ const EXTRACT_SCHEMA = {
         "kel_desa", "kecamatan", "kabupaten", "provinsi", "agama",
         "status_perkawinan", "pekerjaan",
       ],
+      additionalProperties: false,
     },
     kk: {
       type: "object",
@@ -85,6 +102,7 @@ const EXTRACT_SCHEMA = {
               "nama", "nik", "jenis_kelamin", "tempat_lahir", "tgl_lahir",
               "agama", "status_perkawinan", "pekerjaan", "hubungan_keluarga",
             ],
+            additionalProperties: false,
           },
         },
       },
@@ -92,13 +110,21 @@ const EXTRACT_SCHEMA = {
         "no_kk", "alamat", "rt_rw", "kel_desa", "kecamatan", "kabupaten",
         "provinsi", "jumlah_istri", "jumlah_anak", "anggota",
       ],
+      additionalProperties: false,
     },
   },
   required: ["doc_type", "confidence", "warnings", "ktp", "kk"],
+  additionalProperties: false,
 } as const;
 
 function asText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Lepas code fence ```json ... ``` yang kadang dibungkus model. */
+function stripJsonFence(raw: string): string {
+  const m = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  return (m ? m[1] : raw).trim();
 }
 
 function parseResult(raw: unknown): ExtractionResult {
@@ -165,14 +191,20 @@ function parseResult(raw: unknown): ExtractionResult {
   };
 }
 
-/** Kirim 1 gambar (base64) ke Gemini, hasilkan ekstraksi terstruktur. */
-export async function extractDocument(mimeType: string, imageBase64: string): Promise<ExtractionResult> {
+/* ============ Adapter: Google Gemini (default) ============ */
+
+async function extractWithGemini(mimeType: string, imageBase64: string): Promise<ExtractionResult> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY belum diset. Isi .env.local lalu restart dev server.");
   }
   const client = new GoogleGenAI({});
+  // Lepas prefix vendor (mis. "gemini/gemini-3.8-flash" → "gemini-3.8-flash")
+  // supaya AI_MODEL yang dipakai untuk OpenRouter tetap aman jika provider
+  // dikembalikan ke gemini.
+  const rawModel = process.env.GEMINI_MODEL || process.env.AI_MODEL || "gemini-3.8-flash";
+  const model = rawModel.includes("/") ? rawModel.split("/").pop()! : rawModel;
   const interaction = await client.interactions.create({
-    model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    model,
     input: [
       { type: "text", text: PROMPT },
       {
@@ -181,7 +213,7 @@ export async function extractDocument(mimeType: string, imageBase64: string): Pr
         mime_type: mimeType as "image/png" | "image/jpeg",
       },
     ],
-    // Structured output (SDK v2): response_format polimorfik, response_mime_type dihapus.
+    // Structured output (SDK v2): response_format polimorfik.
     response_format: {
       type: "text",
       mime_type: "application/json",
@@ -191,8 +223,99 @@ export async function extractDocument(mimeType: string, imageBase64: string): Pr
 
   const text = (interaction as { output_text?: string }).output_text ?? "";
   try {
-    return parseResult(JSON.parse(text));
+    return parseResult(JSON.parse(stripJsonFence(text)));
   } catch {
     throw new Error("Gagal membaca respons AI (JSON tidak valid). Coba ulangi scan.");
   }
+}
+
+/* ==== Adapter: OpenRouter / endpoint OpenAI-compatible lainnya ==== */
+
+async function extractWithOpenRouter(mimeType: string, imageBase64: string): Promise<ExtractionResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY belum diset. Isi .env.local lalu restart dev server.");
+  }
+  // Base URL bisa diarahkan ke Sumopod / vLLM / Ollama yang OpenAI-compatible.
+  const baseUrl = (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+  const model = process.env.AI_MODEL || "google/gemini-2.5-flash";
+
+  const messages = [
+    {
+      role: "user" as const,
+      content: [
+        { type: "text", text: PROMPT },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+      ],
+    },
+  ];
+
+  const call = async (response_format: unknown): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try {
+      return await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "X-Title": "WargaScan",
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          response_format,
+          temperature: 0.1,
+          max_tokens: maxTokens,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  // Budget token: model reasoning (mis. deepseek) memakai token untuk
+  // "mikir" sebelum JSON final, jadi beri headroom cukup agar tidak terpotong.
+  const maxTokens = Number(process.env.AI_MAX_TOKENS) || 16_384;
+
+  // Utamakan structured output json_schema; fallback ke json_object bila
+  // endpoint/model tidak mendukung (error 400 soal response_format).
+  let res = await call({
+    type: "json_schema",
+    json_schema: {
+      name: "document_extraction",
+      strict: true,
+      schema: EXTRACT_SCHEMA,
+    },
+  });
+  if (res.status === 400) {
+    const errText = await res.text().catch(() => "");
+    if (/json_schema|response_format|structured/i.test(errText)) {
+      res = await call({ type: "json_object" });
+    } else {
+      throw new Error(`Provider AI HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    }
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Provider AI HTTP ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const content = data.choices?.[0]?.message?.content ?? "";
+  try {
+    return parseResult(JSON.parse(stripJsonFence(content)));
+  } catch {
+    throw new Error("Gagal membaca respons AI (JSON tidak valid). Coba ulangi scan.");
+  }
+}
+
+/** Kirim 1 gambar (base64) ke provider AI aktif, hasilkan ekstraksi terstruktur. */
+export async function extractDocument(mimeType: string, imageBase64: string): Promise<ExtractionResult> {
+  const provider = getProvider();
+  if (provider === "openrouter") return extractWithOpenRouter(mimeType, imageBase64);
+  return extractWithGemini(mimeType, imageBase64);
 }
