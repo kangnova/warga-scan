@@ -74,6 +74,7 @@ export interface KkRecord extends BaseRecord, KkMember {
   kabupaten: string;
   provinsi: string;
   jumlah_istri: number | null;
+  jumlah_suami: number | null;
   jumlah_anak: number | null;
 }
 

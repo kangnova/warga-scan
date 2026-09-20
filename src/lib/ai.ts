@@ -33,8 +33,9 @@ ATURAN KETAT:
 6. rt_rw: format "001/002" — pertahankan nol di depan, tetap satu kolom dipisah "/".
 7. alamat: alamat jalan lengkap saja (termasuk DUSUN/ blok jika ada), TANPA RT/RW, kel/desa, kecamatan, kabupaten, provinsi karena itu kolom terpisah.
 8. Untuk KK: anggota berisi SEMUA anggota keluarga termasuk KEPALA KELUARGA, sesuai urutan baris di dokumen.
-   hubungan_keluarga contoh: "KEPALA KELUARGA", "ISTRI", "ANAK", "FAMILIA LAIN", "MENANTU".
-9. jumlah_istri: jumlah anggota yang hubungan_keluarga-nya ISTRI. jumlah_anak: jumlah anggota yang hubungan_keluarga-nya diawali kata ANAK (ANAK, ANAK SAMBUNG, ANAK ANGKAT).
+   hubungan_keluarga contoh: "KEPALA KELUARGA", "ISTERI", "SUAMI", "ANAK", "FAMILIA LAIN", "MENANTU".
+   (Di dokumen resmi lazim tertulis "ISTERI" — salin persis seperti tertulis.)
+9. jumlah_istri dan jumlah_anak adalah estimasi awal; sistem akan MENGHITUNG ULANG secara deterministik dari daftar anggota (ISTERI → istri, KEPALA KELUARGA/SUAMI → suami, ANAK* → anak). Pastikan daftar anggota dan hubungan_keluarga akurat.
 10. KTP sisi belakang biasanya tidak memuat data utama: tetap doc_type "KTP", semua field ktp string kosong, dan tambahkan warning.
 11. warnings: daftar string hal yang perlu diverifikasi manusia, contoh: "NIK terbaca 15 digit", "Sebagian dokumen tertutup bayangan", "Foto buram". Jika tidak ada, array kosong.
 12. confidence: angka 0 sampai 1, estimasi keyakinan keseluruhan pembacaan dokumen.

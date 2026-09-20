@@ -30,7 +30,7 @@ const KK_COLUMNS = [
   "No", "Nama", "NIK", "Jenis Kelamin", "Tempat Lahir", "Tgl Lahir",
   "Alamat", "RT/RW", "Kel/Desa", "Kecamatan", "Kabupaten", "Agama",
   "Status Perkawinan", "Pekerjaan", "Hubungan Keluarga",
-  "No. Kartu Keluarga", "Jumlah Istri", "Jumlah Anak",
+  "No. Kartu Keluarga", "Jumlah Istri", "Jumlah Suami", "Jumlah Anak",
 ] as const;
 
 function ktpRow(k: KtpRecord): (string | number)[] {
@@ -40,7 +40,8 @@ function ktpRow(k: KtpRecord): (string | number)[] {
 function kkRow(k: KkRecord): (string | number)[] {
   return [k.nama, k.nik, k.jenis_kelamin, k.tempat_lahir, k.tgl_lahir, k.alamat,
     k.rt_rw, k.kel_desa, k.kecamatan, k.kabupaten, k.agama, k.status_perkawinan,
-    k.pekerjaan, k.hubungan_keluarga, k.no_kk, k.jumlah_istri ?? "-", k.jumlah_anak ?? "-"];
+    k.pekerjaan, k.hubungan_keluarga, k.no_kk,
+    k.jumlah_istri ?? "-", k.jumlah_suami ?? "-", k.jumlah_anak ?? "-"];
 }
 
 export default function Home() {

@@ -72,6 +72,7 @@ export async function ensureSchema(): Promise<void> {
       pekerjaan TEXT NOT NULL DEFAULT '',
       hubungan_keluarga TEXT NOT NULL DEFAULT '',
       jumlah_istri INTEGER,
+      jumlah_suami INTEGER,
       jumlah_anak INTEGER,
       confidence REAL,
       needs_review BOOLEAN NOT NULL DEFAULT FALSE,
@@ -96,4 +97,7 @@ export async function ensureSchema(): Promise<void> {
       `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS file_path TEXT NOT NULL DEFAULT ''`
     );
   }
+  await pool.query(
+    `ALTER TABLE kk_records ADD COLUMN IF NOT EXISTS jumlah_suami INTEGER`
+  );
 }
