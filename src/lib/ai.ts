@@ -181,9 +181,12 @@ export async function extractDocument(mimeType: string, imageBase64: string): Pr
         mime_type: mimeType as "image/png" | "image/jpeg",
       },
     ],
-    // Structured output: schema JSON + mime type di level params (flat).
-    response_format: EXTRACT_SCHEMA,
-    response_mime_type: "application/json",
+    // Structured output (SDK v2): response_format polimorfik, response_mime_type dihapus.
+    response_format: {
+      type: "text",
+      mime_type: "application/json",
+      schema: EXTRACT_SCHEMA,
+    },
   });
 
   const text = (interaction as { output_text?: string }).output_text ?? "";

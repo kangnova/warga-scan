@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool, isDbConfigured } from "@/lib/db";
+import { deleteUpload, type StorageBackend } from "@/lib/storage";
 
 export const runtime = "nodejs";
+
+interface RecordRow {
+  file_backend?: StorageBackend;
+  file_path?: string;
+}
 
 export async function DELETE(
   _req: Request,
@@ -18,8 +24,20 @@ export async function DELETE(
 
   try {
     await ensureSchema();
+    const pool = getPool()!;
     const table = kind === "ktp" ? "ktp_records" : "kk_records";
-    await getPool()!.query(`DELETE FROM ${table} WHERE id = $1`, [numId]);
+
+    // Ambil info file dulu, hapus fisiknya (best-effort), lalu hapus barisnya.
+    const sel = await pool.query<RecordRow>(
+      `SELECT file_backend, file_path FROM ${table} WHERE id = $1`,
+      [numId]
+    );
+    const row = sel.rows[0];
+    if (row) {
+      await deleteUpload({ backend: row.file_backend ?? "disk", objectPath: row.file_path });
+    }
+
+    await pool.query(`DELETE FROM ${table} WHERE id = $1`, [numId]);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/records error:", err);

@@ -86,4 +86,14 @@ export async function ensureSchema(): Promise<void> {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_ktp_records_nik ON ktp_records (nik)`
   );
+
+  // Kolom storage (ditambahkan setelah integrasi Supabase Storage; idempotent).
+  for (const table of ["ktp_records", "kk_records"]) {
+    await pool.query(
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS file_backend TEXT NOT NULL DEFAULT 'disk'`
+    );
+    await pool.query(
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS file_path TEXT NOT NULL DEFAULT ''`
+    );
+  }
 }

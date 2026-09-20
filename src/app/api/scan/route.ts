@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { detectMime, MAX_FILE_SIZE, sanitizeFileName } from "@/lib/detect";
 import { extractDocument, isAiConfigured } from "@/lib/ai";
 import { renderPdfPages } from "@/lib/pdf";
-import { saveUpload } from "@/lib/storage";
+import { saveUpload, type StoredFile } from "@/lib/storage";
 import { ensureSchema, getPool, isDbConfigured } from "@/lib/db";
 import type { ExtractionResult, KkRecord, KtpRecord, ScanResponse } from "@/lib/types";
 
@@ -10,13 +10,15 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const KTP_COLUMNS = `(
-  file_name, file_url, nama, nik, tempat_lahir, tgl_lahir, alamat, rt_rw,
+  file_name, file_url, file_backend, file_path,
+  nama, nik, tempat_lahir, tgl_lahir, alamat, rt_rw,
   kel_desa, kecamatan, kabupaten, provinsi, agama, status_perkawinan, pekerjaan,
   confidence, needs_review, warnings
 )`;
 
 const KK_COLUMNS = `(
-  file_name, file_url, no_kk, nama, nik, jenis_kelamin, tempat_lahir, tgl_lahir,
+  file_name, file_url, file_backend, file_path,
+  no_kk, nama, nik, jenis_kelamin, tempat_lahir, tgl_lahir,
   alamat, rt_rw, kel_desa, kecamatan, kabupaten, provinsi,
   agama, status_perkawinan, pekerjaan, hubungan_keluarga,
   jumlah_istri, jumlah_anak, confidence, needs_review, warnings
@@ -64,13 +66,14 @@ export async function POST(req: Request) {
 
   // Simpan file asli lebih dulu agar tetap bisa ditampilkan walau ekstraksi gagal.
   const fileName = sanitizeFileName(file.name);
-  let fileUrl: string;
+  let stored: StoredFile;
   try {
-    fileUrl = await saveUpload(buf, mime);
+    stored = await saveUpload(buf, mime);
   } catch (err) {
     console.error("Gagal menyimpan upload:", err);
     return NextResponse.json({ ok: false, error: "Gagal menyimpan file." } satisfies ScanResponse, { status: 500 });
   }
+  const fileUrl = stored.url;
 
   // Siapkan gambar untuk AI: gambar → langsung; PDF → render jadi PNG per halaman.
   let images: { mime: string; base64: string }[];
@@ -150,9 +153,10 @@ export async function POST(req: Request) {
       const k = result.ktp;
       const ins = await pool.query(
         `INSERT INTO ktp_records ${KTP_COLUMNS}
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb)
          RETURNING *`,
-        [fileName, fileUrl, k.nama, k.nik, k.tempat_lahir, k.tgl_lahir, k.alamat, k.rt_rw,
+        [fileName, fileUrl, stored.backend, stored.objectPath,
+         k.nama, k.nik, k.tempat_lahir, k.tgl_lahir, k.alamat, k.rt_rw,
          k.kel_desa, k.kecamatan, k.kabupaten, k.provinsi, k.agama, k.status_perkawinan,
          k.pekerjaan, result.confidence, needsReview, warns]
       );
@@ -169,9 +173,10 @@ export async function POST(req: Request) {
       for (const m of kk.anggota) {
         const ins = await pool.query(
           `INSERT INTO kk_records ${KK_COLUMNS}
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb)
            RETURNING *`,
-          [fileName, fileUrl, kk.no_kk, m.nama, m.nik, m.jenis_kelamin, m.tempat_lahir,
+          [fileName, fileUrl, stored.backend, stored.objectPath,
+           kk.no_kk, m.nama, m.nik, m.jenis_kelamin, m.tempat_lahir,
            m.tgl_lahir, kk.alamat, kk.rt_rw, kk.kel_desa, kk.kecamatan, kk.kabupaten,
            kk.provinsi, m.agama, m.status_perkawinan, m.pekerjaan, m.hubungan_keluarga,
            kk.jumlah_istri, kk.jumlah_anak, result.confidence, needsReview, warns]

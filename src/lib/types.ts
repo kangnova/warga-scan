@@ -55,6 +55,8 @@ export interface BaseRecord {
   id: number;
   file_name: string;
   file_url: string;
+  file_backend?: "supabase" | "disk";
+  file_path?: string;
   confidence: number | null;
   needs_review: boolean;
   warnings: string[];
