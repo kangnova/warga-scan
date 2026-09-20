@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KkRecord, KtpRecord, RecordsResponse, ScanResponse } from "@/lib/types";
+import type {
+  InsertKkResponse,
+  KkRecord,
+  KtpRecord,
+  PendingKk,
+  RecordsResponse,
+  ScanResponse,
+} from "@/lib/types";
 
 type Phase = "idle" | "scanning" | "done" | "error";
 
@@ -47,6 +54,10 @@ export default function Home() {
   const [tab, setTab] = useState<"ktp" | "kk">("ktp");
   const [dragOver, setDragOver] = useState(false);
   const [flashIds, setFlashIds] = useState<Set<number>>(new Set());
+  const [targetName, setTargetName] = useState("");
+  const [pending, setPending] = useState<PendingKk | null>(null);
+  const [selectedMembers, setSelectedMembers] = useState<Set<number>>(new Set());
+  const [savingPending, setSavingPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -74,6 +85,8 @@ export default function Home() {
     setWarnings([]);
     setPreview(null);
     setFlashIds(new Set());
+    setPending(null);
+    setSelectedMembers(new Set());
 
     const localUrl = URL.createObjectURL(file);
     setPreview(localUrl);
@@ -87,6 +100,7 @@ export default function Home() {
     try {
       const form = new FormData();
       form.append("file", file);
+      if (targetName.trim()) form.append("targetName", targetName.trim());
       const res = await fetch("/api/scan", { method: "POST", body: form });
       const data: ScanResponse = await res.json();
 
@@ -102,6 +116,18 @@ export default function Home() {
       }
 
       setWarnings(data.warnings ?? []);
+
+      // KK menunggu konfirmasi user: tampilkan checklist anggota.
+      if (data.pending) {
+        setPending(data.pending);
+        setSelectedMembers(new Set(data.pending.kk.anggota.map((_, i) => i)));
+        setPreview(data.pending.fileUrl ?? localUrl);
+        setTab("kk");
+        setPhase("done");
+        if (data.error) setErrorMsg(data.error);
+        return;
+      }
+
       const newIds = new Set<number>();
       if (data.docType === "KTP" && data.ktp) newIds.add(data.ktp.id);
       if (data.docType === "KK" && data.kk) data.kk.forEach((r) => newIds.add(r.id));
@@ -117,6 +143,53 @@ export default function Home() {
     } catch {
       setPhase("error");
       setErrorMsg("Gagal terhubung ke server.");
+    }
+  }
+
+  function toggleMember(i: number) {
+    setSelectedMembers((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  async function savePending() {
+    if (!pending || selectedMembers.size === 0 || savingPending) return;
+    setSavingPending(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/records/kk/insert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: pending.fileName,
+          fileUrl: pending.fileUrl,
+          fileBackend: pending.fileBackend,
+          filePath: pending.filePath,
+          kk: pending.kk,
+          selected: [...selectedMembers].sort((a, b) => a - b),
+          confidence: pending.confidence,
+          warnings: pending.warnings,
+        }),
+      });
+      const data: InsertKkResponse = await res.json();
+      if (!res.ok || !data.ok || !data.kk) {
+        setErrorMsg(data.error ?? "Gagal menyimpan data KK.");
+        return;
+      }
+      const newIds = new Set(data.kk.map((r) => r.id));
+      setFlashIds(newIds);
+      setTimeout(() => setFlashIds(new Set()), 2500);
+      setTab("kk");
+      await loadRecords();
+      setPending(null);
+      setPhase("done");
+    } catch {
+      setErrorMsg("Gagal terhubung ke server.");
+    } finally {
+      setSavingPending(false);
     }
   }
 
@@ -194,6 +267,20 @@ export default function Home() {
                 e.target.value = "";
               }}
             />
+            <div className="mt-3 text-left">
+              <label htmlFor="targetName" className="block text-xs font-medium text-slate-500">
+                Scan atas nama (opsional — khusus KK, simpan hanya orang itu)
+              </label>
+              <input
+                id="targetName"
+                type="text"
+                value={targetName}
+                onChange={(e) => setTargetName(e.target.value)}
+                placeholder="mis. Nova Suharyanto"
+                disabled={scanning}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none disabled:bg-slate-100"
+              />
+            </div>
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -228,7 +315,54 @@ export default function Home() {
             </div>
           </div>
 
-          {phase === "done" && !errorMsg && (
+          {pending && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+              <p className="text-sm font-semibold text-sky-900">
+                Kartu Keluarga terdeteksi — pilih anggota yang masuk tabel:
+              </p>
+              <p className="mt-0.5 text-xs text-sky-700">
+                No. KK: {pending.kk.no_kk || "-"} · {pending.kk.anggota.length} anggota · istri {pending.kk.jumlah_istri} · anak {pending.kk.jumlah_anak}
+              </p>
+              <div className="mt-3 space-y-1.5">
+                {pending.kk.anggota.map((m, i) => (
+                  <label
+                    key={i}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedMembers.has(i)}
+                      onChange={() => toggleMember(i)}
+                      className="h-4 w-4 accent-emerald-600"
+                    />
+                    <span className="font-medium">{m.nama || "(nama tidak terbaca)"}</span>
+                    <span className="text-xs text-slate-400">
+                      {m.hubungan_keluarga}{m.nik ? ` · ${m.nik}` : ""}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={savePending}
+                  disabled={savingPending || selectedMembers.size === 0}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {savingPending ? "Menyimpan…" : `Simpan ${selectedMembers.size} anggota ke tabel`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPending(null)}
+                  disabled={savingPending}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          )}
+          {phase === "done" && !errorMsg && !pending && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               ✅ Scan selesai — data masuk ke tabel {tab === "ktp" ? "Data KTP" : "Data Kartu Keluarga"}.
             </div>

@@ -4,6 +4,7 @@ import { extractDocument, isAiConfigured } from "@/lib/ai";
 import { renderPdfPages } from "@/lib/pdf";
 import { saveUpload, type StoredFile } from "@/lib/storage";
 import { ensureSchema, getPool, isDbConfigured } from "@/lib/db";
+import { insertKkMembers, nameMatches, type KkFileMeta } from "@/lib/records";
 import type { ExtractionResult, KkRecord, KtpRecord, ScanResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,14 +17,6 @@ const KTP_COLUMNS = `(
   confidence, needs_review, warnings
 )`;
 
-const KK_COLUMNS = `(
-  file_name, file_url, file_backend, file_path,
-  no_kk, nama, nik, jenis_kelamin, tempat_lahir, tgl_lahir,
-  alamat, rt_rw, kel_desa, kecamatan, kabupaten, provinsi,
-  agama, status_perkawinan, pekerjaan, hubungan_keluarga,
-  jumlah_istri, jumlah_anak, confidence, needs_review, warnings
-)`;
-
 export async function POST(req: Request) {
   if (!isAiConfigured()) {
     return NextResponse.json(
@@ -33,11 +26,14 @@ export async function POST(req: Request) {
   }
 
   let file: File;
+  let targetName = "";
   try {
     const form = await req.formData();
     const f = form.get("file");
     if (!(f instanceof File)) throw new Error("no file");
     file = f;
+    const t = form.get("targetName");
+    if (typeof t === "string") targetName = t.trim().slice(0, 100);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Request tidak valid: file tidak ditemukan." } satisfies ScanResponse,
@@ -148,6 +144,12 @@ export async function POST(req: Request) {
     await ensureSchema();
     const pool = getPool()!;
     const warns = JSON.stringify(result.warnings);
+    const meta: KkFileMeta = {
+      fileName,
+      fileUrl,
+      fileBackend: stored.backend,
+      filePath: stored.objectPath,
+    };
 
     if (result.doc_type === "KTP" && result.ktp) {
       const k = result.ktp;
@@ -169,23 +171,40 @@ export async function POST(req: Request) {
 
     if (result.doc_type === "KK" && result.kk) {
       const kk = result.kk;
-      const rows: KkRecord[] = [];
-      for (const m of kk.anggota) {
-        const ins = await pool.query(
-          `INSERT INTO kk_records ${KK_COLUMNS}
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb)
-           RETURNING *`,
-          [fileName, fileUrl, stored.backend, stored.objectPath,
-           kk.no_kk, m.nama, m.nik, m.jenis_kelamin, m.tempat_lahir,
-           m.tgl_lahir, kk.alamat, kk.rt_rw, kk.kel_desa, kk.kecamatan, kk.kabupaten,
-           kk.provinsi, m.agama, m.status_perkawinan, m.pekerjaan, m.hubungan_keluarga,
-           kk.jumlah_istri, kk.jumlah_anak, result.confidence, needsReview, warns]
-        );
-        rows.push(ins.rows[0] as KkRecord);
+
+      // Mode "atas nama": langsung simpan hanya anggota yang cocok dengan targetName.
+      if (targetName) {
+        const matched = kk.anggota.filter((m) => nameMatches(targetName, m.nama));
+        if (matched.length === 0) {
+          // Nama tidak ditemukan → kirim daftar anggota sebagai pending agar
+          // user bisa memilih manual (checklist).
+          return NextResponse.json({
+            ok: true, docType: "KK", confidence: result.confidence,
+            warnings: ["Nama target tidak ditemukan di dokumen. Pilih anggota secara manual.", ...result.warnings],
+            previewUrl: fileUrl,
+            pending: {
+              fileName, fileUrl, fileBackend: stored.backend, filePath: stored.objectPath,
+              confidence: result.confidence, warnings: result.warnings, kk,
+            },
+          } satisfies ScanResponse);
+        }
+        const rows = await insertKkMembers(pool, meta, kk, result.confidence, result.warnings,
+          kk.anggota.map((m, i) => (nameMatches(targetName, m.nama) ? i : -1)).filter((i) => i >= 0));
+        return NextResponse.json({
+          ok: true, docType: "KK", confidence: result.confidence,
+          warnings: result.warnings, previewUrl: fileUrl, kk: rows,
+        } satisfies ScanResponse);
       }
+
+      // Tanpa targetName: JANGAN auto-insert semua anggota. Kirim sebagai pending
+      // agar user memilih lewat checklist siapa yang masuk tabel.
       return NextResponse.json({
         ok: true, docType: "KK", confidence: result.confidence,
-        warnings: result.warnings, previewUrl: fileUrl, kk: rows,
+        warnings: result.warnings, previewUrl: fileUrl,
+        pending: {
+          fileName, fileUrl, fileBackend: stored.backend, filePath: stored.objectPath,
+          confidence: result.confidence, warnings: result.warnings, kk,
+        },
       } satisfies ScanResponse);
     }
 

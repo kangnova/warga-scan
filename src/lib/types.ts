@@ -77,6 +77,17 @@ export interface KkRecord extends BaseRecord, KkMember {
   jumlah_anak: number | null;
 }
 
+/** KK menunggu konfirmasi user: pilih anggota mana yang dimasukkan ke tabel. */
+export interface PendingKk {
+  fileName: string;
+  fileUrl: string;
+  fileBackend: "supabase" | "disk";
+  filePath: string;
+  confidence: number;
+  warnings: string[];
+  kk: KkExtraction;
+}
+
 export interface ScanResponse {
   ok: boolean;
   docType?: DocType;
@@ -84,6 +95,24 @@ export interface ScanResponse {
   warnings?: string[];
   previewUrl?: string;
   ktp?: KtpRecord;
+  kk?: KkRecord[];
+  pending?: PendingKk;
+  error?: string;
+}
+
+export interface InsertKkRequest {
+  fileName: string;
+  fileUrl: string;
+  fileBackend: "supabase" | "disk";
+  filePath: string;
+  kk: KkExtraction;
+  selected?: number[];
+  confidence?: number;
+  warnings?: string[];
+}
+
+export interface InsertKkResponse {
+  ok: boolean;
   kk?: KkRecord[];
   error?: string;
 }
