@@ -196,14 +196,29 @@ export default function Home() {
 
   async function handleDelete(kind: "ktp" | "kk", id: number) {
     if (!confirm("Hapus baris ini?")) return;
-    const res = await fetch(`/api/records/${kind}/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setFlashIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      loadRecords();
+
+    // Optimistic update: langsung hilangkan dari tabel seketika (0ms jeda)
+    const prevRecords = records;
+    setRecords((prev) => ({
+      ...prev,
+      [kind]: prev[kind].filter((r) => r.id !== id),
+    }));
+    setFlashIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    try {
+      const res = await fetch(`/api/records/${kind}/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        setRecords(prevRecords);
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Gagal menghapus data.");
+      }
+    } catch {
+      setRecords(prevRecords);
+      alert("Gagal terhubung ke server saat menghapus data.");
     }
   }
 

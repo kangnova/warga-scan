@@ -17,15 +17,19 @@ export function isDbConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
+let schemaPromise: Promise<void> | null = null;
+
 /**
  * Membuat tabel ktp_records & kk_records bila belum ada.
- * Dipanggil otomatis saat app start / request pertama (idempotent).
+ * Dipanggil otomatis saat app start / request pertama (idempotent & dicache di memori).
  */
 export async function ensureSchema(): Promise<void> {
   const pool = getPool();
   if (!pool) return;
 
-  await pool.query(`
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      await pool.query(`
     CREATE TABLE IF NOT EXISTS ktp_records (
       id BIGSERIAL PRIMARY KEY,
       file_name TEXT NOT NULL,
@@ -100,4 +104,11 @@ export async function ensureSchema(): Promise<void> {
   await pool.query(
     `ALTER TABLE kk_records ADD COLUMN IF NOT EXISTS jumlah_suami INTEGER`
   );
+  })().catch((err) => {
+    schemaPromise = null;
+    throw err;
+  });
+  }
+
+  return schemaPromise;
 }

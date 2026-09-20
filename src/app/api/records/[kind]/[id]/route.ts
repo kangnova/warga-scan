@@ -27,17 +27,21 @@ export async function DELETE(
     const pool = getPool()!;
     const table = kind === "ktp" ? "ktp_records" : "kk_records";
 
-    // Ambil info file dulu, hapus fisiknya (best-effort), lalu hapus barisnya.
+    // Ambil info file dulu, hapus baris database, lalu hapus fisiknya di background (non-blocking).
     const sel = await pool.query<RecordRow>(
       `SELECT file_backend, file_path FROM ${table} WHERE id = $1`,
       [numId]
     );
     const row = sel.rows[0];
-    if (row) {
-      await deleteUpload({ backend: row.file_backend ?? "disk", objectPath: row.file_path });
-    }
 
     await pool.query(`DELETE FROM ${table} WHERE id = $1`, [numId]);
+
+    if (row?.file_path) {
+      deleteUpload({ backend: row.file_backend ?? "disk", objectPath: row.file_path }).catch((err) => {
+        console.error("Non-blocking deleteUpload error:", err);
+      });
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/records error:", err);
