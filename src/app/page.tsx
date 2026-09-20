@@ -387,7 +387,7 @@ export default function Home() {
 
         {/* ==== Kolom kanan: tabel data ==== */}
         <section className="min-w-0">
-          <div className="mb-3 flex gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setTab("ktp")}
@@ -406,6 +406,17 @@ export default function Home() {
             >
               Data Kartu Keluarga ({records.kk.length})
             </button>
+            <a
+              href={`/api/export/${tab}`}
+              className={`ml-auto rounded-lg border px-4 py-2 text-sm font-semibold ${
+                (tab === "ktp" ? records.ktp : records.kk).length === 0
+                  ? "pointer-events-none border-slate-200 text-slate-300"
+                  : "border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+              }`}
+              title={`Download tabel ${tab === "ktp" ? "KTP" : "Kartu Keluarga"} sebagai file Excel (.xlsx)`}
+            >
+              ⬇ Export Excel
+            </a>
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">

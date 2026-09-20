@@ -24,6 +24,7 @@ The UI shows a live preview with a document **scan animation** while extraction 
 - Structured output via Gemini JSON schema — anti-hallucination by design
 - Confidence score + per-record review warnings
 - Separate **KTP** and **Kartu Keluarga** data tables with full demographic columns
+- **Excel export** (`.xlsx`) per table — text-formatted NIK/No. KK cells (no scientific notation), styled header, frozen top row, auto-filter
 - Graceful degradation: runs without a database (results shown, not persisted) and surfaces clear setup warnings
 - Safe file handling: magic-byte type detection, path-traversal-proof file serving, size limits
 
@@ -65,6 +66,16 @@ npm run dev
 | `DATABASE_URL` | Any PostgreSQL — locally, or free from [neon.tech](https://neon.tech) |
 
 Open http://localhost:3000, drop a document, done.
+
+## API endpoints
+
+| Endpoint | Fungsi |
+|---|---|
+| `POST /api/scan` | Upload + scan dokumen (`multipart/form-data`: `file`, `targetName` opsional) |
+| `GET /api/records` | List semua record KTP & KK |
+| `POST /api/records/kk/insert` | Simpan anggota KK terpilih (setelah checklist) |
+| `DELETE /api/records/{kind}/{id}` | Hapus 1 baris (+ file fisiknya) |
+| `GET /api/export/ktp` · `GET /api/export/kk` | Download tabel sebagai `.xlsx` |
 
 ## Database schema
 
