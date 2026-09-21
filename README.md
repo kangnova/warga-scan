@@ -6,6 +6,9 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org)
 [![Gemini](https://img.shields.io/badge/Google-Gemini_Vision-4285F4)](https://ai.google.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)](https://www.postgresql.org)
+[![Vercel Demo](https://img.shields.io/badge/Live_Demo-warga--scan.vercel.app-000000?logo=vercel)](https://warga-scan.vercel.app)
+
+🔗 **Live Demo:** [https://warga-scan.vercel.app](https://warga-scan.vercel.app)
 
 ## What it does
 
