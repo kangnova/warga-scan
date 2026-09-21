@@ -9,6 +9,7 @@ import type {
   RecordsResponse,
   ScanResponse,
 } from "@/lib/types";
+import { convertPdfToImageFile } from "@/lib/client-pdf";
 
 type Phase = "idle" | "scanning" | "done" | "error";
 
@@ -89,7 +90,9 @@ export default function Home() {
     setPending(null);
     setSelectedMembers(new Set());
 
-    const localUrl = URL.createObjectURL(file);
+    // Konversi PDF ke gambar di client agar rendering 100% mulus di serverless Vercel
+    const processedFile = await convertPdfToImageFile(file);
+    const localUrl = URL.createObjectURL(processedFile);
     setPreview(localUrl);
 
     // Animasi tahapan scan (gambar langsung tampil, scanline jalan di atasnya).
@@ -100,7 +103,7 @@ export default function Home() {
 
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", processedFile);
       if (targetName.trim()) form.append("targetName", targetName.trim());
       const res = await fetch("/api/scan", { method: "POST", body: form });
       const data: ScanResponse = await res.json();
